@@ -4,6 +4,7 @@ const EventEmitter = require('events');
 const Client = require('node-xmpp-client');
 const logger = require('../modules/logger');
 const uuid = require('uuid');
+const Message = require('./message');
 
 class Bot extends EventEmitter {
 	constructor(options) {
@@ -17,8 +18,13 @@ class Bot extends EventEmitter {
 		this.presences = [];
 		this.profile = null;
 		this.serverData = null;
+
+		this.emit('created');
 	}
 
+	/**
+	 * Connectes client and sets up client events
+	 */
 	connect() {
 		this.client = new Client(this.options);
 
@@ -31,16 +37,25 @@ class Bot extends EventEmitter {
 			.on('offline', this.onOffline.bind(this));
 	}
 
+	/**
+	 * Disconnected event handler
+	 */
 	onDisconnect(error) {
 		this.emit('disconnected', error);
 		logger.warn(`Client disconnected: ${error}, ${this.client.connection.reconnect}`);
 	}
 
+	/**
+	 * Reconnecting event handler
+	 */
 	onReconnect() {
 		this.emit('reconnecting');
 		logger.info('Client reconnecting');
 	}
 
+	/**
+	 * Offline handler
+	 */
 	onOffline() {
 		this.emit('offline');
 		logger.info('Client offline');
@@ -49,7 +64,8 @@ class Bot extends EventEmitter {
 	onStanza(stanza) {
 		// TODO ignore messages from ourselves
 
-		//logger.info(`stanza: ${stanza}`);
+		//logger.info('stanza', stanza);
+
 		if (stanza.attrs.type === 'error') {
 			this.handleErrorStanza(stanza);
 		}
@@ -67,10 +83,18 @@ class Bot extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Generic error handler
+	 */
 	onError(e) {
+		this.emit('error', e);
 		logger.error('onError', e);
 	}
 
+	/**
+	 * Online event handler
+	 * called every time the client connects
+	 */
 	onOnline() {
 		logger.info('Client connected');
 
@@ -79,10 +103,14 @@ class Bot extends EventEmitter {
 		this.emit('connected');
 
 		let startupData = this.getStartupData().then(resp => this.onStartupDataResult(resp));
-		//let profile = this.requestProfile().then(resp => this.onProfileResult(resp));
 		let rooms = this.requestRooms().then(resp => this.onRoomsResult(resp));
 		let roster = this.requestRoster().then(resp => this.onRosterResult(resp));
+		//let profile = this.requestProfile().then(resp => this.onProfileResult(resp));
 
+		this.startKeepAlive();
+	}
+
+	startKeepAlive() {
 		this.keepAlive = setInterval(() => {
 			if (this.client.connection.connected) {
 				logger.debug('Keepalive');
@@ -94,10 +122,17 @@ class Bot extends EventEmitter {
 		}, this.keepAliveTime);
 	}
 
+	/**
+	 * Handle Profile responses
+	 * Todo: startup already handles this, and the format is different in vCard here
+	 */
 	onProfileResult(stanza) {
 		logger.info('Profile response', stanza.toString());
 	}
 
+	/**
+	 * Handle Room updates
+	 */
 	onRoomsResult(stanza) {
 		this.rooms = [];
 
@@ -124,6 +159,9 @@ class Bot extends EventEmitter {
 		logger.silly('Rooms stanza', stanza.toString());
 	}
 
+	/**
+	 * Handle Roster updates
+	 */
 	onRosterResult(stanza) {
 		this.roster = [];
 
@@ -143,6 +181,9 @@ class Bot extends EventEmitter {
 		logger.silly('Roster stanza', stanza.toString());
 	}
 
+	/**
+	 * Process Startup response data
+	 */
 	onStartupDataResult(stanza) {
 		this.serverData = this.serverData || {};
 		let data = {};
@@ -151,14 +192,15 @@ class Bot extends EventEmitter {
 		let preferences = query.getChild('preferences');
 
 		// get user details into separate profile object
-		this.profile = data.user_id = parseInt(query.getChild('user_id').getText());
-		this.profile = data.email = query.getChild('email').getText();
-		this.profile = data.mention_name = query.getChild('mention_name').getText();
-		this.profile = data.name = query.getChild('name').getText();
-		this.profile = data.photo_large = query.getChild('photo_large').getText();
-		this.profile = data.photo_small = query.getChild('photo_small').getText();
-		this.profile = data.title = query.getChild('title').getText();
-		this.profile = data.is_admin = query.getChild('is_admin').getText();
+		this.profile = this.profile || {};
+		this.profile.user_id 		= data.user_id = parseInt(query.getChild('user_id').getText());
+		this.profile.email 			= data.email = query.getChild('email').getText();
+		this.profile.mention_name 	= data.mention_name = query.getChild('mention_name').getText();
+		this.profile.name 			= data.name = query.getChild('name').getText();
+		this.profile.photo_large 	= data.photo_large = query.getChild('photo_large').getText();
+		this.profile.photo_small 	= data.photo_small = query.getChild('photo_small').getText();
+		this.profile.title 			= data.title = query.getChild('title').getText();
+		this.profile.is_admin	 	= data.is_admin = query.getChild('is_admin').getText();
 
 		data.group_id = parseInt(query.getChild('group_id').getText());
 		data.group_name = query.getChild('group_name').getText();
@@ -172,7 +214,6 @@ class Bot extends EventEmitter {
 		data.plan = query.getChild('plan').getText();
 
 		data.autojoin = [];
-
 		preferences
 			.getChild('autoJoin')
 			.getChildren('item')
@@ -190,10 +231,6 @@ class Bot extends EventEmitter {
 						owner: x.getChild('owner').getText(),
 						num_participants: parseInt(x.getChild('num_participants').getText())
 					});
-				} else {
-					data.autojoin.push({
-						jid: room.attrs.jid
-					});
 				}
 			});
 
@@ -201,8 +238,16 @@ class Bot extends EventEmitter {
 		logger.info('Received Startup data, including user profile.', this.serverData);
 		this.emit('profile', this.profile);
 		this.emit('startup', this.serverData);
+
+		this.serverData.autojoin.forEach((room) => {
+			console.log('join', room);
+			this.joinRoom(room.jid);
+		});
 	}
 
+	/**
+	 * Handles IQ responses by emitting them back to the handler
+	 */
 	handleIqStanza(stanza) {
 		if (stanza.attrs.id) {
 			return this.emit(`id:${stanza.attrs.id}`, stanza);
@@ -212,6 +257,9 @@ class Bot extends EventEmitter {
 		logger.debug('IQ', stanza.toString());
 	}
 
+	/**
+	 * Handle presence stanzas
+	 */
 	handlePresenceStanza(stanza) {
 		let presence = {};
 		let show = stanza.getChild('show');
@@ -223,7 +271,12 @@ class Bot extends EventEmitter {
 		presence.client_type = null;
 
 		if (show) {	presence.show = show.getText(); }
-		if (x) { presence.client_type = x.getChild('client_type').getText(); }
+		if (x) {
+			let client_type = x.getChild('client_type');
+			if (client_type) {
+				presence.client_type =  client_type.getText();
+			}
+		}
 
 		let idx = this.presences.map((p) => {
 					return p.user;
@@ -236,16 +289,66 @@ class Bot extends EventEmitter {
 		}
 
 		logger.debug(`Presence updated for ${presence.user}`);
+		this.emit('presenceUpdate', presence);
 	}
 
+	/**
+	 * Handle message type stanzas
+	 * - echoes anything messaged
+	 */
 	handleMessageStanza(stanza) {
-		stanza.attrs.to = stanza.attrs.from;
-		delete stanza.attrs.from;
+		logger.info('Message', stanza);
 
-		logger.info(`Responding to ${stanza.attrs.to} with an echo.`, stanza.toString());
-		this.client.send(stanza);
+		let xyzzy = /xyzzy/i;
+		let message = this.parseMessageType(stanza);
+
+		if (message && xyzzy.test(message.body)) {
+			console.log('hit xyzzy');
+			if (message.type === 'groupchat_generic') {
+				this.postMessage(message.from, 'Nothing happens...');
+			}
+
+		}
 	}
 
+	parseMessageType(stanza) {
+		let linkPostRegEx = /\/link$/i;
+		let message = new Message();
+
+		message.from = stanza.attrs.from;
+
+		if (linkPostRegEx.test(stanza.attrs.from)) {
+			message.type = 'link';
+			message.body = stanza.getChildText('body').trim();
+			return message;
+		}
+
+		if (stanza.getChild('subject')) {
+			message.type = 'topic';
+			message.body = stanza.getChildText('subject').trim();
+			return message;
+		}
+
+		if (stanza.getChild('body') && stanza.attrs.type === 'groupchat') {
+			message.type = 'groupchat_generic';
+			message.body = stanza.getChildText('body').trim();
+			return message;
+
+		}
+
+		if (stanza.getChild('body') && stanza.attrs.type === 'chat') {
+			message.type = 'private_message';
+			message.body = stanza.getChildText('body').trim();
+			return message;
+
+		}
+
+		return null;
+	}
+
+	/**
+	 * handle error stanzas
+	 */
 	handleErrorStanza(stanza) {
 		logger.warn('Error stanza', stanza.toString());
 	}
@@ -254,11 +357,15 @@ class Bot extends EventEmitter {
 	 * Post a message to a target room or user
 	 */
 	postMessage(to, message) {
-		let stanza = new Client.Stanza('message', { to: to, type: 'chat' })
+		let stanza = new Client.Stanza('message', { to: to, type: 'groupchat' })
 			.c('body').t(message);
 		this.client.send(stanza);
+		logger.info('Posting message', stanza);
 	}
 
+	/**
+	 * Submit IQ stanzas and return a promise
+	 */
 	sendQuery(stanza) {
 		let guid = uuid.v1();
 		stanza = stanza.root();
@@ -266,6 +373,8 @@ class Bot extends EventEmitter {
 		let result = new Promise((resolve, reject) => {
 			this.once(`id:${guid}`, (response) => {
 				resolve(response);
+
+				// TODO error handling
 			});
 		});
 
@@ -337,17 +446,17 @@ class Bot extends EventEmitter {
 	 * - `historyStanzas`: how many lines of history to get upon joining
 	 */
 	joinRoom(roomJid, historyStanzas) {
-		let stanza = new Client.Stanza();
-		if (!historyStanzas) {
-			historyStanzas = 0;
-		}
-		var packet = new xmpp.Element('presence', { to: roomJid + '/' + this.name });
-		packet.c('x', { xmlns: 'http://jabber.org/protocol/muc' })
+		if (!historyStanzas) { historyStanzas = 0; }
+
+		let stanza = new Client.Stanza('presence', { to: roomJid + '/' + this.profile.name })
+			.c('x', { xmlns: 'http://jabber.org/protocol/muc' })
 			.c('history', {
 				xmlns: 'http://jabber.org/protocol/muc',
 				maxstanzas: String(historyStanzas)
 			});
-		this.jabber.send(packet);
+
+		logger.info('Joining room', stanza.toString());
+
 		this.client.send(stanza);
 	}
 
@@ -357,7 +466,7 @@ class Bot extends EventEmitter {
 	 * - `roomJid`: Target room, in the form of `????_????@conf.hipchat.com`
 	 */
 	partRoom(roomJid) {
-		var stanza = new Client.Stanza('presence', { type: 'unavailable', to: roomJid + '/' + this.name });
+		var stanza = new Client.Stanza('presence', { type: 'unavailable', to: roomJid + '/' + this.profile.name });
 		stanza.c('x', { xmlns: 'http://jabber.org/protocol/muc' });
 		stanza.c('status').t('hc-leave');
 		this.client.send(stanza);
