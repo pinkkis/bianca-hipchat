@@ -13,7 +13,10 @@ class Bot extends EventEmitter {
 
 		this.keepAliveTime = this.options.keepAliveTime || 60000;
 		this.rooms = [];
+		this.roster = [];
+		this.presences = [];
 		this.profile = null;
+		this.serverData = null;
 	}
 
 	connect() {
@@ -65,7 +68,7 @@ class Bot extends EventEmitter {
 	}
 
 	onError(e) {
-		logger.error(e);
+		logger.error('onError', e);
 	}
 
 	onOnline() {
@@ -75,13 +78,14 @@ class Bot extends EventEmitter {
 
 		this.emit('connected');
 
-		let profile = this.requestProfile().then((resp) => this.onProfileResult);
-		let rooms = this.requestRooms().then((resp) => this.onRoomsResult);
-		let roster = this.requestRoster().then((resp) => this.onRosterResult);
+		let startupData = this.getStartupData().then(resp => this.onStartupDataResult(resp));
+		//let profile = this.requestProfile().then(resp => this.onProfileResult(resp));
+		let rooms = this.requestRooms().then(resp => this.onRoomsResult(resp));
+		let roster = this.requestRoster().then(resp => this.onRosterResult(resp));
 
 		this.keepAlive = setInterval(() => {
 			if (this.client.connection.connected) {
-				logger.info('Sending keepalive');
+				logger.debug('Keepalive');
 				this.client.send((' '));
 			} else {
 				clearInterval(this.keepAlive);
@@ -91,15 +95,112 @@ class Bot extends EventEmitter {
 	}
 
 	onProfileResult(stanza) {
-		logger.info(`Profile response: ${stanza.toString()}`);
+		logger.info('Profile response', stanza.toString());
 	}
 
 	onRoomsResult(stanza) {
-		logger.info(`Rooms response: ${stanza.toString()}`);
+		this.rooms = [];
+
+		stanza
+			.getChild('query')
+			.getChildren('item')
+			.map((room, i, a) => {
+				let x = room.getChild('x', 'http://hipchat.com/protocol/muc#room');
+				this.rooms.push({
+					jid: room.attrs.jid,
+					name: room.attrs.name,
+					id: parseInt(x.getChild('id').getText()),
+					topic: x.getChild('topic').getText(),
+					privacy: x.getChild('privacy').getText(),
+					owner: x.getChild('owner').getText(),
+					num_participants: parseInt(x.getChild('num_participants').getText()),
+					guest_url: x.getChild('guest_url').getText(),
+					is_archived: x.getChild('is_archived') ? true : false
+				});
+			});
+
+		this.emit('roomsUpdate', this.rooms);
+		logger.info(`Rooms updated with ${this.rooms.length} rooms`);
+		logger.silly('Rooms stanza', stanza.toString());
 	}
 
 	onRosterResult(stanza) {
-		logger.info(`Roster response: ${stanza.toString()}`);
+		this.roster = [];
+
+		stanza
+			.getChild('query')
+			.getChildren('item')
+			.map((user, i, a) => {
+				this.roster.push({
+					jid: user.attrs.jid,
+					name: user.attrs.name,
+					mention_name: user.attrs.mention_name
+				});
+			});
+
+		this.emit('rosterUpdate', this.roster);
+		logger.info(`Roster updated with ${this.roster.length} users`);
+		logger.silly('Roster stanza', stanza.toString());
+	}
+
+	onStartupDataResult(stanza) {
+		this.serverData = this.serverData || {};
+		let data = {};
+
+		let query = stanza.getChild('query');
+		let preferences = query.getChild('preferences');
+
+		// get user details into separate profile object
+		this.profile = data.user_id = parseInt(query.getChild('user_id').getText());
+		this.profile = data.email = query.getChild('email').getText();
+		this.profile = data.mention_name = query.getChild('mention_name').getText();
+		this.profile = data.name = query.getChild('name').getText();
+		this.profile = data.photo_large = query.getChild('photo_large').getText();
+		this.profile = data.photo_small = query.getChild('photo_small').getText();
+		this.profile = data.title = query.getChild('title').getText();
+		this.profile = data.is_admin = query.getChild('is_admin').getText();
+
+		data.group_id = parseInt(query.getChild('group_id').getText());
+		data.group_name = query.getChild('group_name').getText();
+		data.group_uri_domain = query.getChild('group_uri_domain').getText();
+		data.group_invite_url = query.getChild('group_invite_url').getText();
+		data.group_avatar_url = query.getChild('group_avatar_url').getText();
+		data.group_absolute_avatar_url = query.getChild('group_absolute_avatar_url').getText();
+
+		data.token = query.getChild('token').getText();
+		data.addlive_app_id = query.getChild('addlive_app_id').getText();
+		data.plan = query.getChild('plan').getText();
+
+		data.autojoin = [];
+
+		preferences
+			.getChild('autoJoin')
+			.getChildren('item')
+			.map((room, i, a) => {
+				let x = room.getChild('x', 'http://hipchat.com/protocol/muc#room');
+
+				// list includes rooms and 1-1 convos
+				if (x) {
+					data.autojoin.push({
+						jid: room.attrs.jid,
+						name: room.attrs.name,
+						id: parseInt(x.getChild('id').getText()),
+						topic: x.getChild('topic').getText(),
+						privacy: x.getChild('privacy').getText(),
+						owner: x.getChild('owner').getText(),
+						num_participants: parseInt(x.getChild('num_participants').getText())
+					});
+				} else {
+					data.autojoin.push({
+						jid: room.attrs.jid
+					});
+				}
+			});
+
+		Object.assign(this.serverData, data);
+		logger.info('Received Startup data, including user profile.', this.serverData);
+		this.emit('profile', this.profile);
+		this.emit('startup', this.serverData);
 	}
 
 	handleIqStanza(stanza) {
@@ -107,24 +208,46 @@ class Bot extends EventEmitter {
 			return this.emit(`id:${stanza.attrs.id}`, stanza);
 		}
 
-		// TODO
-		logger.debug(`IQ: ${stanza.toString()}`);
+		// TODO what if it doesn't have an id
+		logger.debug('IQ', stanza.toString());
 	}
 
 	handlePresenceStanza(stanza) {
-		logger.debug(`presence stanza: ${stanza.toString()}`);
+		let presence = {};
+		let show = stanza.getChild('show');
+		let x = stanza.getChild('x');
+
+		presence.user = stanza.attrs.from;
+		presence.type = stanza.attrs.type;
+		presence.show = null;
+		presence.client_type = null;
+
+		if (show) {	presence.show = show.getText(); }
+		if (x) { presence.client_type = x.getChild('client_type').getText(); }
+
+		let idx = this.presences.map((p) => {
+					return p.user;
+				}).indexOf(presence.user);
+
+		if (idx < 0) {
+			this.presences.push(presence);
+		} else {
+			this.presences[idx] = presence;
+		}
+
+		logger.debug(`Presence updated for ${presence.user}`);
 	}
 
 	handleMessageStanza(stanza) {
 		stanza.attrs.to = stanza.attrs.from;
 		delete stanza.attrs.from;
 
-		logger.info(`Responding to ${stanza.attrs.to} with an echo`);
+		logger.info(`Responding to ${stanza.attrs.to} with an echo.`, stanza.toString());
 		this.client.send(stanza);
 	}
 
 	handleErrorStanza(stanza) {
-		logger.warn(`Error stanza: ${stanza.toString()}`);
+		logger.warn('Error stanza', stanza.toString());
 	}
 
 	/**
@@ -152,6 +275,16 @@ class Bot extends EventEmitter {
 	}
 
 	/**
+	 * Startup query
+	 */
+	getStartupData() {
+		let stanza = new Client.Stanza('iq', { to: this.options.mucHost, type: 'get' })
+			.c('query', { xmlns: 'http://hipchat.com/protocol/startup', send_auto_join_user_presences: true });
+
+		return this.sendQuery(stanza);
+	}
+
+	/**
 	 * Set your availability and status message
 	 */
 	setAvailability(availability, status) {
@@ -172,7 +305,7 @@ class Bot extends EventEmitter {
 	 */
 	requestProfile() {
 		// vcard query
-		let stanza = new Client.Stanza('iq', { type: 'get'})
+		let stanza = new Client.Stanza('iq', { type: 'get' })
 			.c('vCard', { xmlns: 'vcard-temp' });
 
 		return this.sendQuery(stanza);
@@ -185,24 +318,6 @@ class Bot extends EventEmitter {
 		let stanza = new Client.Stanza('iq', { type: 'get' })
 			.c('query', { xmlns: 'jabber:iq:roster' });
 
-
-		// this.sendIq(iq, function(err, stanza) {
-		//   var rosterItems = [];
-		//   if (!err) {
-		//     // parse response into objects
-		//     stanza.getChild('query').getChildren('item').map(function(el) {
-		//       rosterItems.push({
-		//         jid: el.attrs.jid,
-		//         name: el.attrs.name,
-		//         // name used to @mention this user
-		//         mention_name: el.attrs.mention_name,
-		//       });
-		//     });
-		//   }
-		//   callback(err, rosterItems, stanza);
-		// });
-
-
 		return this.sendQuery(stanza);
 	}
 
@@ -212,29 +327,6 @@ class Bot extends EventEmitter {
 	requestRooms() {
 		let stanza = new Client.Stanza('iq', { to: this.options.mucHost, type: 'get' })
 			.c('query', { xmlns: 'http://jabber.org/protocol/disco#items' });
-
-		// this.sendIq(iq, function(err, stanza) {
-		//   var rooms = [];
-		//   if (!err) {
-		//     // parse response into objects
-		//     stanza.getChild('query').getChildren('item').map(function(el) {
-		//       var x = el.getChild('x', 'http://hipchat.com/protocol/muc#room');
-		//       rooms.push({
-		//         jid: el.attrs.jid,
-		//         name: el.attrs.name,
-		//         id: parseInt(x.getChild('id').getText()),
-		//         topic: x.getChild('topic').getText(),
-		//         privacy: x.getChild('privacy').getText(),
-		//         owner: x.getChild('owner').getText(),
-		//         num_participants:
-		//           parseInt(x.getChild('num_participants').getText()),
-		//         guest_url: x.getChild('guest_url').getText(),
-		//         is_archived: x.getChild('is_archived') ? true : false
-		//       });
-		//     });
-		//   }
-		//   callback(err, rooms, stanza);
-		// });
 
 		return this.sendQuery(stanza);
 	}
@@ -272,21 +364,5 @@ class Bot extends EventEmitter {
 	}
 
 }
-
-//   Bot.prototype.getProfile = function(callback) {
-//     var stanza = new xmpp.Element('iq', { type: 'get' })
-//                  .c('vCard', { xmlns: 'vcard-temp' });
-//     this.sendIq(stanza, function(err, response) {
-//       var data = {};
-//       if (!err) {
-//         var fields = response.getChild('vCard').children;
-//         fields.forEach(function(field) {
-//           data[field.name.toLowerCase()] = field.getText();
-//         });
-//       }
-//       callback(err, data, response);
-//     });
-//   };
-
 
 module.exports = Bot;
