@@ -1,10 +1,9 @@
 'use strict';
 
 const EventEmitter = require('events');
-const Client = require('node-xmpp-client');
+const Xmpp = require('node-xmpp-client');
 const logger = require('../modules/logger');
 const uuid = require('uuid');
-const Message = require('./message');
 
 class Bot extends EventEmitter {
 	constructor(options) {
@@ -26,7 +25,7 @@ class Bot extends EventEmitter {
 	 * Connectes client and sets up client events
 	 */
 	connect() {
-		this.client = new Client(this.options);
+		this.client = new Xmpp(this.options);
 
 		this.client
 			.on('online', this.onOnline.bind(this))
@@ -193,14 +192,14 @@ class Bot extends EventEmitter {
 
 		// get user details into separate profile object
 		this.profile = this.profile || {};
-		this.profile.user_id 		= data.user_id = parseInt(query.getChild('user_id').getText());
-		this.profile.email 			= data.email = query.getChild('email').getText();
-		this.profile.mention_name 	= data.mention_name = query.getChild('mention_name').getText();
-		this.profile.name 			= data.name = query.getChild('name').getText();
-		this.profile.photo_large 	= data.photo_large = query.getChild('photo_large').getText();
-		this.profile.photo_small 	= data.photo_small = query.getChild('photo_small').getText();
-		this.profile.title 			= data.title = query.getChild('title').getText();
-		this.profile.is_admin	 	= data.is_admin = query.getChild('is_admin').getText();
+		this.profile.user_id = data.user_id = parseInt(query.getChild('user_id').getText());
+		this.profile.email = data.email = query.getChild('email').getText();
+		this.profile.mention_name = data.mention_name = query.getChild('mention_name').getText();
+		this.profile.name = data.name = query.getChild('name').getText();
+		this.profile.photo_large = data.photo_large = query.getChild('photo_large').getText();
+		this.profile.photo_small = data.photo_small = query.getChild('photo_small').getText();
+		this.profile.title = data.title = query.getChild('title').getText();
+		this.profile.is_admin = data.is_admin = query.getChild('is_admin').getText();
 
 		data.group_id = parseInt(query.getChild('group_id').getText());
 		data.group_name = query.getChild('group_name').getText();
@@ -234,6 +233,8 @@ class Bot extends EventEmitter {
 				}
 			});
 
+		this.profile.jid = new Xmpp.JID(data.group_id + '_' + data.user_id, this.options.host, null);
+
 		Object.assign(this.serverData, data);
 		logger.info('Received Startup data, including user profile.', this.serverData);
 		this.emit('profile', this.profile);
@@ -265,22 +266,22 @@ class Bot extends EventEmitter {
 		let show = stanza.getChild('show');
 		let x = stanza.getChild('x');
 
-		presence.user = stanza.attrs.from;
+		presence.user = new Xmpp.JID(stanza.attrs.from);
 		presence.type = stanza.attrs.type;
 		presence.show = null;
 		presence.client_type = null;
 
-		if (show) {	presence.show = show.getText(); }
+		if (show) { presence.show = show.getText(); }
 		if (x) {
 			let client_type = x.getChild('client_type');
 			if (client_type) {
-				presence.client_type =  client_type.getText();
+				presence.client_type = client_type.getText();
 			}
 		}
 
 		let idx = this.presences.map((p) => {
-					return p.user;
-				}).indexOf(presence.user);
+			return p.user;
+		}).indexOf(presence.user);
 
 		if (idx < 0) {
 			this.presences.push(presence);
@@ -288,62 +289,66 @@ class Bot extends EventEmitter {
 			this.presences[idx] = presence;
 		}
 
-		logger.debug(`Presence updated for ${presence.user}`);
+		logger.debug(`Presence updated for ${presence.user.toString()}`);
 		this.emit('presenceUpdate', presence);
 	}
 
 	/**
 	 * Handle message type stanzas
-	 * - echoes anything messaged
 	 */
 	handleMessageStanza(stanza) {
-		logger.info('Message', stanza);
+		let message = this.parseMessageStanza(stanza);
 
-		let xyzzy = /xyzzy/i;
-		let message = this.parseMessageType(stanza);
+		logger.info('Received message', message);
 
-		if (message && xyzzy.test(message.body)) {
-			console.log('hit xyzzy');
-			if (message.type === 'groupchat_generic') {
-				this.postMessage(message.from, 'Nothing happens...');
-			}
-
+		if (message.type === 'chat') {
+			this.emit('privateMessage', message);
 		}
+
+		if (message.type === 'groupchat') {
+			this.emit('groupMessage', message);
+		}
+
+		if (message.isChannelMessage) {
+			this.emit('channelMessage', message);
+		}
+
+		if (message.hasAtMention) {
+			this.emit('atMention', message);
+		}
+
+		if (message.hasNameMention) {
+			this.emit('nameMention', message);
+		}
+
+		if (message.hasChannelMention) {
+			this.emit('channelAlert', message);
+		}
+
+		this.emit('message', message);
 	}
 
-	parseMessageType(stanza) {
+	parseMessageStanza(stanza) {
+		let message = {};
+
 		let linkPostRegEx = /\/link$/i;
-		let message = new Message();
+		let channelMentionRegEx = /\@all|@here/ig;
+		let nameMentionRegEx = new RegExp(this.profile.name, 'i');
+		let atMentionRegEx = new RegExp('@' + this.profile.mention_name, 'i');
 
-		message.from = stanza.attrs.from;
+		message.from = new Xmpp.JID(stanza.attrs.from);
+		message.to = new Xmpp.JID(stanza.attrs.to);
+		message.isLinkPost = linkPostRegEx.test(stanza.attrs.from);
+		message.body = stanza.getChildText('body');
+		message.type = stanza.attrs.type;
+		message.subject = stanza.getChildText('subject');
+		message.isChannelMessage = message.subject && !message.from.getResource();
+		message.hasNameMention = nameMentionRegEx.test(message.body);
+		message.hasAtMention = atMentionRegEx.test(message.body);
+		message.hasChannelMention = channelMentionRegEx.test(message.body);
+		message.channel = message.type === 'groupchat' ? message.from.bare() : null;
 
-		if (linkPostRegEx.test(stanza.attrs.from)) {
-			message.type = 'link';
-			message.body = stanza.getChildText('body').trim();
-			return message;
-		}
-
-		if (stanza.getChild('subject')) {
-			message.type = 'topic';
-			message.body = stanza.getChildText('subject').trim();
-			return message;
-		}
-
-		if (stanza.getChild('body') && stanza.attrs.type === 'groupchat') {
-			message.type = 'groupchat_generic';
-			message.body = stanza.getChildText('body').trim();
-			return message;
-
-		}
-
-		if (stanza.getChild('body') && stanza.attrs.type === 'chat') {
-			message.type = 'private_message';
-			message.body = stanza.getChildText('body').trim();
-			return message;
-
-		}
-
-		return null;
+		return message;
 	}
 
 	/**
@@ -357,10 +362,23 @@ class Bot extends EventEmitter {
 	 * Post a message to a target room or user
 	 */
 	postMessage(to, message) {
-		let stanza = new Client.Stanza('message', { to: to, type: 'groupchat' })
+		let toJid = to instanceof Xmpp.JID ? to : new Xmpp.JID(to);
+		let stanza;
+
+		if (toJid.domain === this.options.mucHost) {
+			stanza = new Xmpp.Stanza('message', { to: `${toJid.bare()}/${this.profile.name}`, type: 'groupchat' });
+		} else {
+			stanza = new Xmpp.Stanza('message', { to: toJid, type: 'chat', from: this.profile.jid });
+		}
+
+		stanza
+			.c('active', { xmlns : 'http://jabber.org/protocol/chatstates' })
+			.up()
 			.c('body').t(message);
+
 		this.client.send(stanza);
-		logger.info('Posting message', stanza);
+		logger.info('Sent message', stanza);
+		this.emit('sendMessage', stanza);
 	}
 
 	/**
@@ -387,7 +405,7 @@ class Bot extends EventEmitter {
 	 * Startup query
 	 */
 	getStartupData() {
-		let stanza = new Client.Stanza('iq', { to: this.options.mucHost, type: 'get' })
+		let stanza = new Xmpp.Stanza('iq', { to: this.options.mucHost, type: 'get' })
 			.c('query', { xmlns: 'http://hipchat.com/protocol/startup', send_auto_join_user_presences: true });
 
 		return this.sendQuery(stanza);
@@ -397,7 +415,7 @@ class Bot extends EventEmitter {
 	 * Set your availability and status message
 	 */
 	setAvailability(availability, status) {
-		let stanza = new Client.Stanza('presence', { type: 'available' })
+		let stanza = new Xmpp.Stanza('presence', { type: 'available' })
 			.c('show').t(availability).up()
 			.c('status').t(status)
 			.c('c', {
@@ -414,7 +432,7 @@ class Bot extends EventEmitter {
 	 */
 	requestProfile() {
 		// vcard query
-		let stanza = new Client.Stanza('iq', { type: 'get' })
+		let stanza = new Xmpp.Stanza('iq', { type: 'get' })
 			.c('vCard', { xmlns: 'vcard-temp' });
 
 		return this.sendQuery(stanza);
@@ -424,7 +442,7 @@ class Bot extends EventEmitter {
 	 * Requets a full roster
 	 */
 	requestRoster() {
-		let stanza = new Client.Stanza('iq', { type: 'get' })
+		let stanza = new Xmpp.Stanza('iq', { type: 'get' })
 			.c('query', { xmlns: 'jabber:iq:roster' });
 
 		return this.sendQuery(stanza);
@@ -434,7 +452,7 @@ class Bot extends EventEmitter {
 	 * Request all rooms
 	 */
 	requestRooms() {
-		let stanza = new Client.Stanza('iq', { to: this.options.mucHost, type: 'get' })
+		let stanza = new Xmpp.Stanza('iq', { to: this.options.mucHost, type: 'get' })
 			.c('query', { xmlns: 'http://jabber.org/protocol/disco#items' });
 
 		return this.sendQuery(stanza);
@@ -448,7 +466,7 @@ class Bot extends EventEmitter {
 	joinRoom(roomJid, historyStanzas) {
 		if (!historyStanzas) { historyStanzas = 0; }
 
-		let stanza = new Client.Stanza('presence', { to: roomJid + '/' + this.profile.name })
+		let stanza = new Xmpp.Stanza('presence', { to: roomJid + '/' + this.profile.name })
 			.c('x', { xmlns: 'http://jabber.org/protocol/muc' })
 			.c('history', {
 				xmlns: 'http://jabber.org/protocol/muc',
@@ -466,7 +484,7 @@ class Bot extends EventEmitter {
 	 * - `roomJid`: Target room, in the form of `????_????@conf.hipchat.com`
 	 */
 	partRoom(roomJid) {
-		var stanza = new Client.Stanza('presence', { type: 'unavailable', to: roomJid + '/' + this.profile.name });
+		var stanza = new Xmpp.Stanza('presence', { type: 'unavailable', to: roomJid + '/' + this.profile.name });
 		stanza.c('x', { xmlns: 'http://jabber.org/protocol/muc' });
 		stanza.c('status').t('hc-leave');
 		this.client.send(stanza);
