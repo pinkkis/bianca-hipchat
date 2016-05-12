@@ -5,9 +5,11 @@ const Xmpp = require('node-xmpp-client');
 const logger = require('../modules/logger');
 const uuid = require('uuid');
 
-class Bot extends EventEmitter {
+class Hipchat extends EventEmitter {
 	constructor(options) {
 		super();
+
+		console.log(options);
 
 		this.options = options || {};
 
@@ -61,8 +63,7 @@ class Bot extends EventEmitter {
 	}
 
 	onStanza(stanza) {
-		// TODO ignore messages from ourselves
-
+		// console.log('####', stanza.attrs.from, this.profile);
 		//logger.info('stanza', stanza);
 
 		if (stanza.attrs.type === 'error') {
@@ -342,7 +343,7 @@ class Bot extends EventEmitter {
 		message.body = stanza.getChildText('body');
 		message.type = stanza.attrs.type;
 		message.subject = stanza.getChildText('subject');
-		message.isChannelMessage = message.subject && !message.from.getResource();
+		message.isChannelMessage = message.subject && stanza.attrs.type === 'groupchat';
 		message.hasNameMention = nameMentionRegEx.test(message.body);
 		message.hasAtMention = atMentionRegEx.test(message.body);
 		message.hasChannelMention = channelMentionRegEx.test(message.body);
@@ -492,4 +493,4 @@ class Bot extends EventEmitter {
 
 }
 
-module.exports = Bot;
+module.exports = Hipchat;
