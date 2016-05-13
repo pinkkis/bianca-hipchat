@@ -9,8 +9,6 @@ class Hipchat extends EventEmitter {
 	constructor(options) {
 		super();
 
-		console.log(options);
-
 		this.options = options || {};
 
 		this.keepAliveTime = this.options.keepAliveTime || 60000;
@@ -63,7 +61,6 @@ class Hipchat extends EventEmitter {
 	}
 
 	onStanza(stanza) {
-		// console.log('####', stanza.attrs.from, this.profile);
 		//logger.info('stanza', stanza);
 
 		if (stanza.attrs.type === 'error') {
@@ -142,14 +139,14 @@ class Hipchat extends EventEmitter {
 			.map((room, i, a) => {
 				let x = room.getChild('x', 'http://hipchat.com/protocol/muc#room');
 				this.rooms.push({
-					jid: room.attrs.jid,
+					jid: new Xmpp.JID(room.attrs.jid),
 					name: room.attrs.name,
-					id: parseInt(x.getChild('id').getText()),
-					topic: x.getChild('topic').getText(),
-					privacy: x.getChild('privacy').getText(),
-					owner: x.getChild('owner').getText(),
-					num_participants: parseInt(x.getChild('num_participants').getText()),
-					guest_url: x.getChild('guest_url').getText(),
+					id: parseInt(x.getChildText('id')),
+					topic: x.getChildText('topic'),
+					privacy: x.getChildText('privacy'),
+					owner: x.getChildText('owner'),
+					num_participants: parseInt(x.getChildText('num_participants')),
+					guest_url: x.getChildText('guest_url'),
 					is_archived: x.getChild('is_archived') ? true : false
 				});
 			});
@@ -223,13 +220,13 @@ class Hipchat extends EventEmitter {
 				// list includes rooms and 1-1 convos
 				if (x) {
 					data.autojoin.push({
-						jid: room.attrs.jid,
+						jid: new Xmpp.JID(room.attrs.jid),
 						name: room.attrs.name,
-						id: parseInt(x.getChild('id').getText()),
-						topic: x.getChild('topic').getText(),
-						privacy: x.getChild('privacy').getText(),
-						owner: x.getChild('owner').getText(),
-						num_participants: parseInt(x.getChild('num_participants').getText())
+						id: parseInt(x.getChildText('id')),
+						topic: x.getChildText('topic'),
+						privacy: x.getChildText('privacy'),
+						owner: x.getChildText('owner'),
+						num_participants: parseInt(x.getChildText('num_participants'))
 					});
 				}
 			});
@@ -242,7 +239,6 @@ class Hipchat extends EventEmitter {
 		this.emit('startup', this.serverData);
 
 		this.serverData.autojoin.forEach((room) => {
-			console.log('join', room);
 			this.joinRoom(room.jid);
 		});
 	}
@@ -302,6 +298,10 @@ class Hipchat extends EventEmitter {
 
 		logger.info('Received message', message);
 
+		if (message.isCommand) {
+			this.emit('botCommand', message);
+		}
+
 		if (message.type === 'chat') {
 			this.emit('privateMessage', message);
 		}
@@ -314,16 +314,16 @@ class Hipchat extends EventEmitter {
 			this.emit('channelMessage', message);
 		}
 
-		if (message.hasAtMention) {
+		if (message.hasAtMention && !message.isCommand) {
 			this.emit('atMention', message);
 		}
 
-		if (message.hasNameMention) {
+		if (message.hasNameMention && !message.isCommand) {
 			this.emit('nameMention', message);
 		}
 
 		if (message.hasChannelMention) {
-			this.emit('channelAlert', message);
+			this.emit('channelMention', message);
 		}
 
 		this.emit('message', message);
@@ -333,6 +333,7 @@ class Hipchat extends EventEmitter {
 		let message = {};
 
 		let linkPostRegEx = /\/link$/i;
+		let commandRegEx = new RegExp('^(?:@'+ this.profile.mention_name +'\\s)?!(\\w+)\\s?(.*)?', 'i');
 		let channelMentionRegEx = /\@all|@here/ig;
 		let nameMentionRegEx = new RegExp(this.profile.name, 'i');
 		let atMentionRegEx = new RegExp('@' + this.profile.mention_name, 'i');
@@ -348,6 +349,8 @@ class Hipchat extends EventEmitter {
 		message.hasAtMention = atMentionRegEx.test(message.body);
 		message.hasChannelMention = channelMentionRegEx.test(message.body);
 		message.channel = message.type === 'groupchat' ? message.from.bare() : null;
+		message.isCommand = commandRegEx.test(message.body);
+		message.commandParams = commandRegEx.exec(message.body);
 
 		return message;
 	}
@@ -475,7 +478,6 @@ class Hipchat extends EventEmitter {
 			});
 
 		logger.info('Joining room', stanza.toString());
-
 		this.client.send(stanza);
 	}
 
@@ -488,6 +490,8 @@ class Hipchat extends EventEmitter {
 		var stanza = new Xmpp.Stanza('presence', { type: 'unavailable', to: roomJid + '/' + this.profile.name });
 		stanza.c('x', { xmlns: 'http://jabber.org/protocol/muc' });
 		stanza.c('status').t('hc-leave');
+
+		logger.info('Parting room', stanza.toString());
 		this.client.send(stanza);
 	}
 
