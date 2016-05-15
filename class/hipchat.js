@@ -398,7 +398,6 @@ class Hipchat extends EventEmitter {
 		});
 
 		this.client.send(stanza);
-		console.log('######### this is a test message ###########', stanza);
 		return result;
 	}
 
