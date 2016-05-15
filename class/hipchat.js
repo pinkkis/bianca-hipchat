@@ -61,7 +61,7 @@ class Hipchat extends EventEmitter {
 	}
 
 	onStanza(stanza) {
-		logger.info('stanza', stanza);
+		logger.silly('stanza', stanza);
 
 		if (stanza.attrs.type === 'error') {
 			this.handleErrorStanza(stanza);
@@ -151,7 +151,7 @@ class Hipchat extends EventEmitter {
 			});
 
 		this.emit('roomsUpdate', this.rooms);
-		logger.info(`Rooms updated with ${this.rooms.length} rooms`);
+		logger.info(`Rooms updated with ${this.rooms.length} rooms.`);
 		logger.silly('Rooms stanza', stanza.toString());
 	}
 
@@ -173,7 +173,7 @@ class Hipchat extends EventEmitter {
 			});
 
 		this.emit('rosterUpdate', this.roster);
-		logger.info(`Roster updated with ${this.roster.length} users`);
+		logger.info(`Roster updated with ${this.roster.length} users.`);
 		logger.silly('Roster stanza', stanza.toString());
 	}
 
