@@ -61,7 +61,7 @@ class Hipchat extends EventEmitter {
 	}
 
 	onStanza(stanza) {
-		logger.silly('stanza', stanza);
+		logger.info('stanza', stanza);
 
 		if (stanza.attrs.type === 'error') {
 			this.handleErrorStanza(stanza);
@@ -246,12 +246,12 @@ class Hipchat extends EventEmitter {
 	 * Handles IQ responses by emitting them back to the handler
 	 */
 	handleIqStanza(stanza) {
+		// TODO what if it doesn't have an id
+		logger.debug('IQ', stanza);
+
 		if (stanza.attrs.id) {
 			return this.emit(`id:${stanza.attrs.id}`, stanza);
 		}
-
-		// TODO what if it doesn't have an id
-		logger.debug('IQ', stanza.toString());
 	}
 
 	/**
