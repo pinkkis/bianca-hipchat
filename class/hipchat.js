@@ -306,7 +306,7 @@ class Hipchat extends EventEmitter {
 			this.emit('privateMessage', message);
 		}
 
-		if (message.type === 'groupchat') {
+		if (message.type === 'groupchat' && !message.isChannelMessage) {
 			this.emit('groupMessage', message);
 		}
 
