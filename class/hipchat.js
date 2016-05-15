@@ -61,7 +61,7 @@ class Hipchat extends EventEmitter {
 	}
 
 	onStanza(stanza) {
-		//logger.info('stanza', stanza);
+		logger.silly('stanza', stanza);
 
 		if (stanza.attrs.type === 'error') {
 			this.handleErrorStanza(stanza);
@@ -102,7 +102,6 @@ class Hipchat extends EventEmitter {
 		let startupData = this.getStartupData().then(resp => this.onStartupDataResult(resp));
 		let rooms = this.requestRooms().then(resp => this.onRoomsResult(resp));
 		let roster = this.requestRoster().then(resp => this.onRosterResult(resp));
-		//let profile = this.requestProfile().then(resp => this.onProfileResult(resp));
 
 		this.startKeepAlive();
 	}
@@ -389,19 +388,17 @@ class Hipchat extends EventEmitter {
 	 * Submit IQ stanzas and return a promise
 	 */
 	sendQuery(stanza) {
-		let guid = uuid.v1();
+		let guid = uuid.v4();
 		stanza = stanza.root();
 		stanza.attrs.id = stanza.attrs.id || guid;
 		let result = new Promise((resolve, reject) => {
 			this.once(`id:${guid}`, (response) => {
 				resolve(response);
-
-				// TODO error handling
 			});
 		});
 
 		this.client.send(stanza);
-
+		console.log('######### this is a test message ###########', stanza);
 		return result;
 	}
 
@@ -412,6 +409,7 @@ class Hipchat extends EventEmitter {
 		let stanza = new Xmpp.Stanza('iq', { to: this.options.mucHost, type: 'get' })
 			.c('query', { xmlns: 'http://hipchat.com/protocol/startup', send_auto_join_user_presences: true });
 
+		logger.info('getStartupData', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
@@ -428,6 +426,7 @@ class Hipchat extends EventEmitter {
 				ver: 1
 			});
 
+		logger.info('setAvailability', stanza.toString());
 		this.client.send(stanza);
 	}
 
@@ -439,6 +438,7 @@ class Hipchat extends EventEmitter {
 		let stanza = new Xmpp.Stanza('iq', { type: 'get' })
 			.c('vCard', { xmlns: 'vcard-temp' });
 
+		logger.info('requestProfile', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
@@ -449,6 +449,7 @@ class Hipchat extends EventEmitter {
 		let stanza = new Xmpp.Stanza('iq', { type: 'get' })
 			.c('query', { xmlns: 'jabber:iq:roster' });
 
+		logger.info('requestRoster', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
@@ -459,6 +460,7 @@ class Hipchat extends EventEmitter {
 		let stanza = new Xmpp.Stanza('iq', { to: this.options.mucHost, type: 'get' })
 			.c('query', { xmlns: 'http://jabber.org/protocol/disco#items' });
 
+		logger.info('requestRooms', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
