@@ -246,12 +246,12 @@ class Hipchat extends EventEmitter {
 	 * Handles IQ responses by emitting them back to the handler
 	 */
 	handleIqStanza(stanza) {
-		// TODO what if it doesn't have an id
-		logger.debug('IQ', stanza);
-
 		if (stanza.attrs.id) {
 			return this.emit(`id:${stanza.attrs.id}`, stanza);
 		}
+
+		// TODO what if it doesn't have an id
+		logger.debug('IQ', stanza);
 	}
 
 	/**
@@ -276,8 +276,8 @@ class Hipchat extends EventEmitter {
 		}
 
 		let idx = this.presences.map((p) => {
-			return p.user;
-		}).indexOf(presence.user);
+			return p.user.local;
+		}).indexOf(presence.user.local);
 
 		if (idx < 0) {
 			this.presences.push(presence);
@@ -296,6 +296,10 @@ class Hipchat extends EventEmitter {
 		let message = this.parseMessageStanza(stanza);
 
 		logger.info('Received message', message);
+
+		if (message.invite) {
+			this.emit('invite', message);
+		}
 
 		if (message.isCommand) {
 			this.emit('botCommand', message);
@@ -350,6 +354,23 @@ class Hipchat extends EventEmitter {
 		message.channel = message.type === 'groupchat' ? message.from.bare() : null;
 		message.isCommand = commandRegEx.test(message.body);
 		message.commandParams = commandRegEx.exec(message.body);
+
+		message.invite = null;
+
+		// get further details from X attrs
+		let x = stanza.getChild('x', 'http://jabber.org/protocol/muc#user');
+		if (x) {
+			// check if invite
+			let invite = x.getChild('invite');
+			if (invite) {
+				message.invite = {
+					reason: invite.getChildText('reason'),
+					room: new Xmpp.JID(stanza.attrs.from),
+					from: new Xmpp.JID(invite.attrs.from)
+				};
+			}
+		}
+
 
 		return message;
 	}
