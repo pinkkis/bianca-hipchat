@@ -1,21 +1,41 @@
 {
   "name": "bianca-hipchat",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.5.0",
+  "description": "A hipchat bot written in es6. Used as the hipchat connector for Bianca bot, but works on it's own.",
+  "keywords": [
+    "hipchat",
+    "bianca",
+    "bot",
+    "xmpp",
+    "jabber"
+  ],
+  "author": "@pinkkis",
   "main": "index.js",
   "directories": {
     "test": "test"
   },
+  "dependencies": {
+    "gulp": "^3.9.1",
+    "node-xmpp-client": "^3.0.0",
+    "uuid": "^2.0.2"
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "chai-as-promised": "^5.3.0",
+    "gulp-mocha": "^2.2.0",
+    "mocha": "^2.4.5",
+    "sinon": "^1.17.4",
+    "sinon-chai": "^2.8.0",
+    "yargs": "^4.7.1"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node node_modules/gulp/bin/gulp test"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pinkkis/bianca-hipchat.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/pinkkis/bianca-hipchat/issues"
   },

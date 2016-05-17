@@ -2,7 +2,6 @@
 
 const EventEmitter = require('events');
 const Xmpp = require('node-xmpp-client');
-const logger = require('../modules/logger');
 const uuid = require('uuid');
 
 class Hipchat extends EventEmitter {
@@ -10,6 +9,8 @@ class Hipchat extends EventEmitter {
 		super();
 
 		this.options = options || {};
+
+		this.useLogger(options.logger);
 
 		this.keepAliveTime = this.options.keepAliveTime || 60000;
 		this.rooms = [];
@@ -19,6 +20,19 @@ class Hipchat extends EventEmitter {
 		this.serverData = null;
 
 		this.emit('created');
+	}
+
+	/**
+	 * Override logger with a different implementation, like Winston
+	 */
+	useLogger(logger) {
+		if (logger && typeof logger === 'function') {
+			this.logger = logger;
+		} else {
+			this.logger = global.console;
+			this.logger.debug = global.console.log;
+			this.logger.silly = global.console.log;
+		}
 	}
 
 	/**
@@ -41,7 +55,7 @@ class Hipchat extends EventEmitter {
 	 */
 	onDisconnect(error) {
 		this.emit('disconnected', error);
-		logger.warn(`Client disconnected: ${error}, ${this.client.connection.reconnect}`);
+		this.logger.warn(`Client disconnected: ${error}, ${this.client.connection.reconnect}`);
 	}
 
 	/**
@@ -49,7 +63,7 @@ class Hipchat extends EventEmitter {
 	 */
 	onReconnect() {
 		this.emit('reconnecting');
-		logger.info('Client reconnecting');
+		this.logger.info('Client reconnecting');
 	}
 
 	/**
@@ -57,14 +71,14 @@ class Hipchat extends EventEmitter {
 	 */
 	onOffline() {
 		this.emit('offline');
-		logger.info('Client offline');
+		this.logger.info('Client offline');
 	}
 
 	onStanza(stanza) {
-		logger.silly('stanza', stanza);
+		this.logger.silly('stanza', stanza);
 
 		if (stanza.attrs.type === 'error') {
-			this.handleErrorStanza(stanza);
+			return this.handleErrorStanza(stanza);
 		}
 
 		if (stanza.is('iq')) {
@@ -85,7 +99,7 @@ class Hipchat extends EventEmitter {
 	 */
 	onError(e) {
 		this.emit('error', e);
-		logger.error('onError', e);
+		this.logger.error('onError', e);
 	}
 
 	/**
@@ -93,29 +107,17 @@ class Hipchat extends EventEmitter {
 	 * called every time the client connects
 	 */
 	onOnline() {
-		logger.info('Client connected');
+		this.logger.info('Client connected');
 
 		this.setAvailability('chat', `I'm alive!`);
 
 		this.emit('connected');
 
-		let startupData = this.getStartupData().then(resp => this.onStartupDataResult(resp));
+		let startupData = this.requestStartup().then(resp => this.onStartupDataResult(resp));
 		let rooms = this.requestRooms().then(resp => this.onRoomsResult(resp));
 		let roster = this.requestRoster().then(resp => this.onRosterResult(resp));
 
 		this.startKeepAlive();
-	}
-
-	startKeepAlive() {
-		this.keepAlive = setInterval(() => {
-			if (this.client.connection.connected) {
-				logger.debug('Keepalive');
-				this.client.send((' '));
-			} else {
-				clearInterval(this.keepAlive);
-			}
-
-		}, this.keepAliveTime);
 	}
 
 	/**
@@ -123,7 +125,7 @@ class Hipchat extends EventEmitter {
 	 * Todo: startup already handles this, and the format is different in vCard here
 	 */
 	onProfileResult(stanza) {
-		logger.info('Profile response', stanza.toString());
+		this.logger.info('Profile response', stanza.toString());
 	}
 
 	/**
@@ -151,8 +153,8 @@ class Hipchat extends EventEmitter {
 			});
 
 		this.emit('roomsUpdate', this.rooms);
-		logger.info(`Rooms updated with ${this.rooms.length} rooms.`);
-		logger.silly('Rooms stanza', stanza.toString());
+		this.logger.info(`Rooms updated with ${this.rooms.length} rooms.`);
+		this.logger.silly('Rooms stanza', stanza.toString());
 	}
 
 	/**
@@ -173,8 +175,8 @@ class Hipchat extends EventEmitter {
 			});
 
 		this.emit('rosterUpdate', this.roster);
-		logger.info(`Roster updated with ${this.roster.length} users.`);
-		logger.silly('Roster stanza', stanza.toString());
+		this.logger.info(`Roster updated with ${this.roster.length} users.`);
+		this.logger.silly('Roster stanza', stanza.toString());
 	}
 
 	/**
@@ -216,7 +218,8 @@ class Hipchat extends EventEmitter {
 			.map((room, i, a) => {
 				let x = room.getChild('x', 'http://hipchat.com/protocol/muc#room');
 
-				// list includes rooms and 1-1 convos
+				// list includes rooms and 1-1 convos,
+				// so only look into rooms under x
 				if (x) {
 					data.autojoin.push({
 						jid: new Xmpp.JID(room.attrs.jid),
@@ -233,7 +236,7 @@ class Hipchat extends EventEmitter {
 		this.profile.jid = new Xmpp.JID(data.group_id + '_' + data.user_id, this.options.host, null);
 
 		Object.assign(this.serverData, data);
-		logger.info('Received Startup data, including user profile.', this.serverData);
+		this.logger.info('Received Startup data, including user profile.', this.serverData);
 		this.emit('profile', this.profile);
 		this.emit('startup', this.serverData);
 
@@ -251,7 +254,7 @@ class Hipchat extends EventEmitter {
 		}
 
 		// TODO what if it doesn't have an id
-		logger.debug('IQ', stanza);
+		this.logger.debug('IQ', stanza);
 	}
 
 	/**
@@ -285,7 +288,7 @@ class Hipchat extends EventEmitter {
 			this.presences[idx] = presence;
 		}
 
-		logger.debug(`Presence updated for ${presence.user.toString()}`);
+		this.logger.debug(`Presence updated for ${presence.user.toString()}`);
 		this.emit('presenceUpdate', presence);
 	}
 
@@ -295,7 +298,7 @@ class Hipchat extends EventEmitter {
 	handleMessageStanza(stanza) {
 		let message = this.parseMessageStanza(stanza);
 
-		logger.info('Received message', message);
+		this.logger.info('Received message', message);
 
 		if (message.invite) {
 			this.emit('invite', message);
@@ -332,54 +335,11 @@ class Hipchat extends EventEmitter {
 		this.emit('message', message);
 	}
 
-	parseMessageStanza(stanza) {
-		let message = {};
-
-		let linkPostRegEx = /\/link$/i;
-		let commandRegEx = new RegExp('^(?:@'+ this.profile.mention_name +'\\s)?!(\\w+)\\s?(.*)?', 'i');
-		let channelMentionRegEx = /\@all|@here/ig;
-		let nameMentionRegEx = new RegExp(this.profile.name, 'i');
-		let atMentionRegEx = new RegExp('@' + this.profile.mention_name, 'i');
-
-		message.from = new Xmpp.JID(stanza.attrs.from);
-		message.to = new Xmpp.JID(stanza.attrs.to);
-		message.isLinkPost = linkPostRegEx.test(stanza.attrs.from);
-		message.body = stanza.getChildText('body');
-		message.type = stanza.attrs.type;
-		message.subject = stanza.getChildText('subject');
-		message.isChannelMessage = message.subject && stanza.attrs.type === 'groupchat';
-		message.hasNameMention = nameMentionRegEx.test(message.body);
-		message.hasAtMention = atMentionRegEx.test(message.body);
-		message.hasChannelMention = channelMentionRegEx.test(message.body);
-		message.channel = message.type === 'groupchat' ? message.from.bare() : null;
-		message.isCommand = commandRegEx.test(message.body);
-		message.commandParams = commandRegEx.exec(message.body);
-
-		message.invite = null;
-
-		// get further details from X attrs
-		let x = stanza.getChild('x', 'http://jabber.org/protocol/muc#user');
-		if (x) {
-			// check if invite
-			let invite = x.getChild('invite');
-			if (invite) {
-				message.invite = {
-					reason: invite.getChildText('reason'),
-					room: new Xmpp.JID(stanza.attrs.from),
-					from: new Xmpp.JID(invite.attrs.from)
-				};
-			}
-		}
-
-
-		return message;
-	}
-
 	/**
 	 * handle error stanzas
 	 */
 	handleErrorStanza(stanza) {
-		logger.warn('Error stanza', stanza.toString());
+		this.logger.warn('Error stanza', stanza.toString());
 	}
 
 	/**
@@ -401,7 +361,7 @@ class Hipchat extends EventEmitter {
 			.c('body').t(message);
 
 		this.client.send(stanza);
-		logger.info('Sent message', stanza);
+		this.logger.info('Sent message', stanza);
 		this.emit('sendMessage', stanza);
 	}
 
@@ -425,11 +385,11 @@ class Hipchat extends EventEmitter {
 	/**
 	 * Startup query
 	 */
-	getStartupData() {
+	requestStartup() {
 		let stanza = new Xmpp.Stanza('iq', { to: this.options.mucHost, type: 'get' })
 			.c('query', { xmlns: 'http://hipchat.com/protocol/startup', send_auto_join_user_presences: true });
 
-		logger.info('getStartupData', stanza.toString());
+		this.logger.info('getStartupData', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
@@ -446,7 +406,7 @@ class Hipchat extends EventEmitter {
 				ver: 1
 			});
 
-		logger.info('setAvailability', stanza.toString());
+		this.logger.info('setAvailability', stanza.toString());
 		this.client.send(stanza);
 	}
 
@@ -458,7 +418,7 @@ class Hipchat extends EventEmitter {
 		let stanza = new Xmpp.Stanza('iq', { type: 'get' })
 			.c('vCard', { xmlns: 'vcard-temp' });
 
-		logger.info('requestProfile', stanza.toString());
+		this.logger.info('requestProfile', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
@@ -469,7 +429,7 @@ class Hipchat extends EventEmitter {
 		let stanza = new Xmpp.Stanza('iq', { type: 'get' })
 			.c('query', { xmlns: 'jabber:iq:roster' });
 
-		logger.info('requestRoster', stanza.toString());
+		this.logger.info('requestRoster', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
@@ -480,7 +440,7 @@ class Hipchat extends EventEmitter {
 		let stanza = new Xmpp.Stanza('iq', { to: this.options.mucHost, type: 'get' })
 			.c('query', { xmlns: 'http://jabber.org/protocol/disco#items' });
 
-		logger.info('requestRooms', stanza.toString());
+		this.logger.info('requestRooms', stanza.toString());
 		return this.sendQuery(stanza);
 	}
 
@@ -499,10 +459,9 @@ class Hipchat extends EventEmitter {
 				maxstanzas: String(historyStanzas)
 			});
 
-		logger.info('Joining room', stanza.toString());
+		this.logger.info('Joining room', stanza.toString());
 		this.client.send(stanza);
 	}
-
 
 	/**
 	 * Leave a room
@@ -513,8 +472,81 @@ class Hipchat extends EventEmitter {
 		stanza.c('x', { xmlns: 'http://jabber.org/protocol/muc' });
 		stanza.c('status').t('hc-leave');
 
-		logger.info('Parting room', stanza.toString());
+		this.logger.info('Parting room', stanza.toString());
 		this.client.send(stanza);
+	}
+
+	/**
+	 * Starts the keepalive messages
+	 */
+	startKeepAlive() {
+		this.keepAlive = setInterval(() => {
+			if (this.client.connection.connected) {
+				this.logger.debug('Keepalive ping');
+				this.client.send((' '));
+			} else {
+				clearInterval(this.keepAlive);
+			}
+
+		}, this.keepAliveTime);
+	}
+
+	/**
+	 * clears and stops a running keepalive
+	 */
+	stopKeepAlive() {
+		if (this.keepAlive) {
+			clearInterval(this.keepAlive);
+			this.keepAlive = undefined;
+		}
+	}
+
+	/**
+	 * Parses a message type stanza and returns a message with properties
+	 */
+	parseMessageStanza(stanza) {
+		let message = {};
+
+		let linkPostRegEx = /\/link$/i;
+		let commandRegEx = new RegExp('^(?:@'+ this.profile.mention_name +'\\s)?!(\\w+)\\s?(.*)?', 'i');
+		let channelMentionRegEx = /\@all|@here/ig;
+		let nameMentionRegEx = new RegExp(this.profile.name, 'i');
+		let atMentionRegEx = new RegExp('@' + this.profile.mention_name, 'i');
+
+		message.from = new Xmpp.JID(stanza.attrs.from);
+		message.to = new Xmpp.JID(stanza.attrs.to);
+		message.isLinkPost = linkPostRegEx.test(stanza.attrs.from);
+		message.body = stanza.getChildText('body');
+		message.type = stanza.attrs.type;
+		message.subject = stanza.getChildText('subject');
+		message.isChannelMessage = message.subject && stanza.attrs.type === 'groupchat';
+		message.hasNameMention = nameMentionRegEx.test(message.body);
+		message.hasAtMention = atMentionRegEx.test(message.body);
+		message.hasChannelMention = channelMentionRegEx.test(message.body);
+		message.channel = message.type === 'groupchat' ? message.from.bare() : null;
+		message.isCommand = commandRegEx.test(message.body);
+		message.commandParams = commandRegEx.exec(message.body);
+
+		// TODO: this should be reworked a bit so it's more uniform with other props
+		message.invite = null;
+
+		// get further details from X attrs
+		let x = stanza.getChild('x', 'http://jabber.org/protocol/muc#user');
+		if (x) {
+			// check if invite
+			let invite = x.getChild('invite');
+			if (invite) {
+				message.invite = {
+					reason: invite.getChildText('reason'),
+					room: new Xmpp.JID(stanza.attrs.from),
+					from: new Xmpp.JID(invite.attrs.from)
+				};
+			}
+
+			// other x elements?
+		}
+
+		return message;
 	}
 
 }
