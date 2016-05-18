@@ -191,7 +191,7 @@ class Hipchat extends EventEmitter {
 
 		// get user details into separate profile object
 		this.profile = this.profile || {};
-		this.profile.user_id = data.user_id = parseInt(query.getChildText('user_id').getText());
+		this.profile.user_id = data.user_id = parseInt(query.getChildText('user_id'));
 		this.profile.email = data.email = query.getChildText('email');
 		this.profile.mention_name = data.mention_name = query.getChildText('mention_name');
 		this.profile.name = data.name = query.getChildText('name');
@@ -200,7 +200,7 @@ class Hipchat extends EventEmitter {
 		this.profile.title = data.title = query.getChildText('title');
 		this.profile.is_admin = data.is_admin = query.getChildText('is_admin');
 
-		data.group_id = parseInt(query.getChildText('group_id').getText());
+		data.group_id = parseInt(query.getChildText('group_id'));
 		data.group_name = query.getChildText('group_name');
 		data.group_uri_domain = query.getChildText('group_uri_domain');
 		data.group_invite_url = query.getChildText('group_invite_url');
