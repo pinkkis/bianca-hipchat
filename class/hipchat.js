@@ -26,7 +26,7 @@ class Hipchat extends EventEmitter {
 	 * Override logger with a different implementation, like Winston
 	 */
 	useLogger(logger) {
-		if (logger && typeof logger === 'function') {
+		if (logger && logger.log && logger.debug && logger.info && logger.error && logger.warn) {
 			this.logger = logger;
 		} else {
 			this.logger = global.console;
@@ -109,7 +109,7 @@ class Hipchat extends EventEmitter {
 	onOnline() {
 		this.logger.info('Client connected');
 
-		this.setAvailability('chat', `I'm alive!`);
+		this.setAvailability('chat', `Available`);
 
 		this.emit('connected');
 
@@ -191,25 +191,25 @@ class Hipchat extends EventEmitter {
 
 		// get user details into separate profile object
 		this.profile = this.profile || {};
-		this.profile.user_id = data.user_id = parseInt(query.getChild('user_id').getText());
-		this.profile.email = data.email = query.getChild('email').getText();
-		this.profile.mention_name = data.mention_name = query.getChild('mention_name').getText();
-		this.profile.name = data.name = query.getChild('name').getText();
-		this.profile.photo_large = data.photo_large = query.getChild('photo_large').getText();
-		this.profile.photo_small = data.photo_small = query.getChild('photo_small').getText();
-		this.profile.title = data.title = query.getChild('title').getText();
-		this.profile.is_admin = data.is_admin = query.getChild('is_admin').getText();
+		this.profile.user_id = data.user_id = parseInt(query.getChildText('user_id').getText());
+		this.profile.email = data.email = query.getChildText('email');
+		this.profile.mention_name = data.mention_name = query.getChildText('mention_name');
+		this.profile.name = data.name = query.getChildText('name');
+		this.profile.photo_large = data.photo_large = query.getChildText('photo_large');
+		this.profile.photo_small = data.photo_small = query.getChildText('photo_small');
+		this.profile.title = data.title = query.getChildText('title');
+		this.profile.is_admin = data.is_admin = query.getChildText('is_admin');
 
-		data.group_id = parseInt(query.getChild('group_id').getText());
-		data.group_name = query.getChild('group_name').getText();
-		data.group_uri_domain = query.getChild('group_uri_domain').getText();
-		data.group_invite_url = query.getChild('group_invite_url').getText();
-		data.group_avatar_url = query.getChild('group_avatar_url').getText();
-		data.group_absolute_avatar_url = query.getChild('group_absolute_avatar_url').getText();
+		data.group_id = parseInt(query.getChildText('group_id').getText());
+		data.group_name = query.getChildText('group_name');
+		data.group_uri_domain = query.getChildText('group_uri_domain');
+		data.group_invite_url = query.getChildText('group_invite_url');
+		data.group_avatar_url = query.getChildText('group_avatar_url');
+		data.group_absolute_avatar_url = query.getChildText('group_absolute_avatar_url');
 
-		data.token = query.getChild('token').getText();
-		data.addlive_app_id = query.getChild('addlive_app_id').getText();
-		data.plan = query.getChild('plan').getText();
+		data.token = query.getChildText('token');
+		data.addlive_app_id = query.getChildText('addlive_app_id');
+		data.plan = query.getChildText('plan');
 
 		data.autojoin = [];
 		preferences
@@ -253,7 +253,7 @@ class Hipchat extends EventEmitter {
 			return this.emit(`id:${stanza.attrs.id}`, stanza);
 		}
 
-		// TODO what if it doesn't have an id
+		// TODO: what if it doesn't have an id?
 		this.logger.debug('IQ', stanza);
 	}
 
@@ -279,8 +279,8 @@ class Hipchat extends EventEmitter {
 		}
 
 		let idx = this.presences.map((p) => {
-			return p.user.local;
-		}).indexOf(presence.user.local);
+						return p.user.local;
+					}).indexOf(presence.user.local);
 
 		if (idx < 0) {
 			this.presences.push(presence);
@@ -366,7 +366,8 @@ class Hipchat extends EventEmitter {
 	}
 
 	/**
-	 * Submit IQ stanzas and return a promise
+	 * Submit IQ stanzas for queries and return a promise
+	 * TODO: nothing rejects these on error
 	 */
 	sendQuery(stanza) {
 		let guid = uuid.v4();
@@ -446,8 +447,8 @@ class Hipchat extends EventEmitter {
 
 	/**
 	 * Join room
-	 * - `roomJid`: Target room, in the form of `????_????@conf.hipchat.com`
-	 * - `historyStanzas`: how many lines of history to get upon joining
+	 * - roomJid: Target room, in the form of xxx_xxx@conf.hipchat.com
+	 * - historyStanzas: how many lines of history to get upon joining
 	 */
 	joinRoom(roomJid, historyStanzas) {
 		if (!historyStanzas) { historyStanzas = 0; }
@@ -465,7 +466,7 @@ class Hipchat extends EventEmitter {
 
 	/**
 	 * Leave a room
-	 * - `roomJid`: Target room, in the form of `????_????@conf.hipchat.com`
+	 * - roomJid: Target room, in the form of xxx_xxx@conf.hipchat.com
 	 */
 	partRoom(roomJid) {
 		var stanza = new Xmpp.Stanza('presence', { type: 'unavailable', to: roomJid + '/' + this.profile.name });
@@ -543,7 +544,7 @@ class Hipchat extends EventEmitter {
 				};
 			}
 
-			// other x elements?
+			// TODO are there other x elements?
 		}
 
 		return message;

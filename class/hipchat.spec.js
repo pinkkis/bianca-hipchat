@@ -9,6 +9,10 @@ describe('Class Hipchat', () => {
 		// nothing
 	});
 
+	afterEach(() => {
+		// nohting
+	});
+
 	describe('when creating a new bot', () => {
 
 		it('should take in options', () => {
